@@ -1,0 +1,37 @@
+name: BorderSight Manual CI
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Manual smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install backend dependencies
+        working-directory: bordersight/backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile backend
+        working-directory: bordersight/backend
+        run: python -m compileall -q .
+      - name: Load backend and validate routes
+        working-directory: bordersight/backend
+        run: python ci_smoke.py
+      - name: Install frontend dependencies
+        working-directory: bordersight/frontend
+        run: npm ci
+      - name: Frontend type-check
+        working-directory: bordersight/frontend
+        run: npx tsc --noEmit
+      - name: Frontend production build
+        working-directory: bordersight/frontend
+        run: npm run build
