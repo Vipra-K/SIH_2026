@@ -31,8 +31,8 @@ jobs:
           pip install pytest
       - name: Compile Python sources
         run: python -m compileall -q .
-      - name: Run backend tests
-        run: pytest -q test_main.py
+      - name: Run backend test suite
+        run: pytest -q test_main.py test_live_camera.py
 
   ai-engine:
     name: AI engine validation
@@ -87,6 +87,7 @@ jobs:
           test -f bordersight/backend/main.py
           test -f bordersight/backend/requirements.txt
           test -f bordersight/backend/test_main.py
+          test -f bordersight/backend/test_live_camera.py
           test -f bordersight/frontend/package.json
           test -f bordersight/ai-engine/requirements.txt
           test -f .github/workflows/ci.yml
