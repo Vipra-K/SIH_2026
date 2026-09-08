@@ -1,11 +1,14 @@
+"""Backend API and core behavior regression tests."""
+
 import sys
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-# Allow running this file directly from bordersight/backend or via pytest.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from app.border_engine import BorderEngine  # noqa: E402
+from app.frame_store import after, append, reset  # noqa: E402
 from main import app  # noqa: E402
 
 client = TestClient(app)
@@ -15,8 +18,11 @@ def test_health():
     response = client.get("/api/health")
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "ok"
-    assert body["service"] == "bordersight-api"
+    assert body == {
+        "status": "ok",
+        "service": "bordersight-api",
+        "version": "0.4.0",
+    }
 
 
 def test_dashboard_shape():
@@ -101,3 +107,42 @@ def test_incident_status_update():
     )
     assert response.status_code == 200
     assert response.json()["status"] == "ACKNOWLEDGED"
+
+
+def test_border_engine_detects_boundary_crossing():
+    engine = BorderEngine()
+    assert engine.update(1, (0.5, 0.40), 1.0, "person") == []
+    events = engine.update(1, (0.5, 0.60), 2.0, "person")
+    assert len(events) == 1
+    assert events[0]["type"] == "intrusion"
+    assert events[0]["risk_score"] == 82
+    assert events[0]["severity"] == "critical"
+
+
+def test_border_engine_detects_loitering():
+    engine = BorderEngine(loiter_seconds=5)
+    engine.update(7, (0.5, 0.40), 0.0, "person")
+    engine.update(7, (0.501, 0.401), 1.0, "person")
+    events = engine.update(7, (0.5015, 0.4015), 6.1, "person")
+    assert any(event["type"] == "loitering" for event in events)
+
+
+def test_border_engine_resets_loitering_after_movement():
+    engine = BorderEngine(loiter_seconds=5)
+    engine.update(8, (0.5, 0.40), 0.0, "person")
+    engine.update(8, (0.501, 0.401), 1.0, "person")
+    engine.update(8, (0.20, 0.20), 2.0, "person")
+    events = engine.update(8, (0.201, 0.201), 6.0, "person")
+    assert not any(event["type"] == "loitering" for event in events)
+
+
+def test_frame_store_returns_only_new_frames_and_is_bounded():
+    job_id = "CI-FRAMES"
+    reset(job_id)
+    append(job_id, 1, b"one")
+    append(job_id, 2, b"two")
+    assert after(job_id, 0) == [
+        {"sequence": 1, "jpeg": b"one"},
+        {"sequence": 2, "jpeg": b"two"},
+    ]
+    assert after(job_id, 1) == [{"sequence": 2, "jpeg": b"two"}]
