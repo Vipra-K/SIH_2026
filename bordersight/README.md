@@ -4,12 +4,12 @@ BorderSight is the SIH 2026 prototype for a camera-agnostic border-surveillance 
 
 **Operational loop:**
 
-`video source → detection → tracking → virtual border zone → contextual risk → incident → operator response`
+`camera/video → frame ingestion → YOLO detection/tracking → border rules → risk → incident → operator response`
 
 The repository contains three application parts under `bordersight/`:
 
 - `frontend/` — Next.js 15 + React 19 command-center UI
-- `backend/` — FastAPI REST API and video-processing services
+- `backend/` — FastAPI REST API, live-camera ingestion and video processing
 - `ai-engine/` — Python/OpenCV/Ultralytics detection and tracking engine
 
 > **Important:** This is an SIH prototype, not a production security system. AI detections are decision-support signals and must be verified by authorized personnel.
@@ -19,13 +19,15 @@ The repository contains three application parts under `bordersight/`:
 - Git
 - Node.js 20+ and npm
 - Python 3.12 recommended
-- Optional webcam/phone camera for live-camera demos
+- A browser with camera permission support (Chrome/Edge recommended)
+- Optional phone connected to the laptop as a webcam
 - Optional prerecorded surveillance video
 
 ## Repository structure
 
 ```text
 SIH_2026/
+├── .github/workflows/ci.yml
 └── bordersight/
     ├── frontend/
     ├── backend/
@@ -62,29 +64,14 @@ pip install -r requirements.txt
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Health endpoint:
+Check:
 
 ```text
 http://localhost:8000/api/health
-```
-
-Interactive API documentation:
-
-```text
 http://localhost:8000/docs
 ```
 
-Expected health response:
-
-```json
-{
-  "status": "ok",
-  "service": "bordersight-api",
-  "version": "0.4.0"
-}
-```
-
-The YOLO model is lazy-loaded only when video inference is requested, so basic API startup and tests do not require loading the model.
+The YOLO model is lazy-loaded only when inference is requested.
 
 ## 3. Run the frontend
 
@@ -102,50 +89,85 @@ Open:
 http://localhost:3000
 ```
 
-Production-style local run:
+The frontend defaults to `http://localhost:8000` for the API. If your backend uses another host/port, set `NEXT_PUBLIC_API_URL` before starting the frontend.
+
+## 4. Quick verification before using a camera
+
+Run the backend tests:
 
 ```bash
-npm install
+cd SIH_2026/bordersight/backend
+pytest -q test_main.py test_live_camera.py
+```
+
+Then check the frontend:
+
+```bash
+cd SIH_2026/bordersight/frontend
+npx tsc --noEmit
 npm run build
-npm run start
 ```
 
-## 4. AI engine
+## 5. Use your phone as the live CCTV camera
 
-The AI engine is in `bordersight/ai-engine/`.
+There are two supported practical setups.
 
-```bash
-cd SIH_2026/bordersight/ai-engine
-python3.12 -m venv .venv
+### Recommended SIH demo setup: phone connected to laptop as a webcam
+
+This is the easiest setup when BorderSight is running on the laptop.
+
+1. Connect the phone to the laptop using USB or Wi-Fi.
+2. Use a webcam bridge application of your choice so the phone appears to the operating system as a normal webcam.
+3. Verify the phone camera appears in the laptop's camera application.
+4. Start the BorderSight backend on the laptop.
+5. Start the BorderSight frontend on the laptop.
+6. Open `http://localhost:3000` in Chrome or Edge.
+7. Scroll to **Live surveillance**.
+8. Open the camera dropdown.
+9. Select the phone camera device.
+10. Click **Start live camera**.
+11. Allow browser camera permission when prompted.
+12. The phone video appears in the surveillance panel.
+13. BorderSight captures JPEG frames from the browser camera and sends them to:
+
+```text
+POST /api/live/CAM-02/frame
 ```
 
-Activate the environment and install dependencies:
+14. The backend runs YOLO detection/tracking on each frame.
+15. Detection boxes and labels are shown on the live feed.
+16. The realtime SSE connection updates the dashboard with detections.
+17. Click **Stop live camera** when finished.
 
-### Windows PowerShell
+The phone itself does not need to run the BorderSight backend. In this setup, the **phone is the camera, the laptop is the processing server, and the browser is the live-camera bridge/UI**.
 
-```powershell
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+### Alternative: open BorderSight on the phone itself
+
+A phone browser can also provide its own camera using `getUserMedia`, but the frontend must be served from a secure context and the phone must be able to reach the laptop's backend over the local network. For the SIH demo, the laptop-as-command-center setup above is simpler and more reliable.
+
+## 6. What the live-camera pipeline does
+
+```text
+Phone camera
+    ↓
+Laptop webcam device
+    ↓
+Browser getUserMedia()
+    ↓
+JPEG frame every ~700 ms
+    ↓
+POST /api/live/CAM-02/frame
+    ↓
+YOLO detection + tracking
+    ↓
+Realtime SSE
+    ↓
+BorderSight dashboard
 ```
 
-### macOS / Linux
+The current live endpoint is intentionally lightweight: it performs detection/tracking and publishes realtime detections. The uploaded-video pipeline remains the stronger path for deterministic border-rule/incident demonstrations.
 
-```bash
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-The engine contains:
-
-- `bordersight_engine.py` — contextual border/behavior rules
-- `vision_engine.py` — computer-vision detection/tracking demo
-- `run_demo.py` — demo entry point
-
-## Using a phone as a camera
-
-For the current MVP, no physical CCTV hardware is required. Expose your phone camera to the laptop as a normal webcam using the phone/webcam solution of your choice. The local camera source can then be used by the surveillance workflow.
-
-## Using prerecorded CCTV footage
+## 7. Use prerecorded CCTV footage
 
 The backend supports uploaded surveillance video through:
 
@@ -170,180 +192,133 @@ GET /api/video/jobs/{job_id}
 GET /api/video/jobs/{job_id}/mjpeg
 ```
 
-The MJPEG endpoint streams the annotated frames generated by the same inference pass used for event analysis.
+## 8. Test the incident system
 
-## Core demo flow
-
-1. Start the backend.
-2. Start the frontend.
-3. Open the BorderSight command center.
-4. Start a demo/local camera source or upload surveillance footage.
-5. YOLO detects and tracks objects.
-6. The BorderEngine evaluates border crossing and loitering behavior.
-7. Risk signals are combined into an explainable score.
-8. High-risk events become incidents.
-9. Incidents are delivered to the operator through the realtime stream.
-10. The operator acknowledges/resolves the incident after verification.
-
-## Risk model
-
-The current MVP uses a transparent weighted score:
-
-| Signal | Score |
-|---|---:|
-| Restricted-zone crossing | +50 |
-| Loitering ≥ 60 seconds | +20 |
-| Movement toward border | +20 |
-| Low-light condition | +10 |
-
-Events below `30` do not create an incident. Scores are capped at `100` and mapped to `MEDIUM`, `HIGH`, or `CRITICAL` severity.
-
-The lower-level `BorderEngine` independently detects boundary crossing and loitering behavior from tracked positions.
-
-## API overview
-
-Current API contract: [`docs/API.md`](docs/API.md)
-
-Main endpoints:
+Before the AI camera demo, you can verify the incident API directly at:
 
 ```text
-GET   /api/health
-GET   /api/dashboard
-GET   /api/cameras
-GET   /api/incidents
-GET   /api/incidents/{incident_id}
-PATCH /api/incidents/{incident_id}/status
-POST  /api/events
-GET   /api/zones
-POST  /api/zones
-DELETE /api/zones/{zone_id}
-POST  /api/video/upload
-GET   /api/video/jobs
-GET   /api/video/jobs/{job_id}
-GET   /api/video/jobs/{job_id}/mjpeg
-GET   /api/stream/events
-GET   /api/stream/heartbeat
+http://localhost:8000/docs
 ```
 
-Realtime delivery currently uses **Server-Sent Events (SSE)**. WebSockets are not part of the current implementation.
+Use `POST /api/events` with a high-risk event. Example:
 
-## Testing
+```json
+{
+  "camera_id": "CAM-01",
+  "object_type": "PERSON",
+  "track_id": "TEST-001",
+  "confidence": 0.97,
+  "crossed_restricted_boundary": true,
+  "loiter_seconds": 90,
+  "toward_border": true,
+  "low_light": true
+}
+```
 
-### Backend tests
+The resulting incident should appear in the command center and can be acknowledged from the UI.
 
-From `bordersight/backend`:
+## 9. AI engine
+
+The AI engine is in `bordersight/ai-engine/`.
 
 ```bash
-pip install pytest
-pytest -q test_main.py
+cd SIH_2026/bordersight/ai-engine
+python3.12 -m venv .venv
 ```
 
-The backend suite covers:
+Activate the environment and install dependencies:
 
-- API health
-- dashboard response shape
-- cameras/incidents
-- 404 handling
-- event risk threshold
-- high-risk incident creation
-- incident status updates
-- boundary-crossing detection
-- loitering detection
-- movement reset behavior
-- bounded frame-store behavior
+### Windows PowerShell
 
-### Frontend validation
+```powershell
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
 
-From `bordersight/frontend`:
+### macOS / Linux
 
 ```bash
-npm install
-npx tsc --noEmit
-npm run build
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-## GitHub Actions CI
+## 10. GitHub Actions CI
 
 The workflow is located at:
 
 ```text
-bordersight/.github/workflows/ci.yml
+.github/workflows/ci.yml
 ```
 
-It runs on:
+It runs automatically on pushes to `main` and pull requests targeting `main`. It can also be started manually from **GitHub → Actions → BorderSight CI → Run workflow**.
 
-- pushes to `main`
-- pull requests targeting `main`
-- manual `workflow_dispatch`
-
-The pipeline validates:
+The pipeline checks:
 
 - backend Python compilation
-- backend pytest suite
-- AI-engine Python compilation
-- AI-engine dependency/module imports
+- backend API tests
+- live-camera API smoke tests
+- AI-engine Python compilation/imports
 - frontend TypeScript
 - frontend production build
 - required project structure
 
-A separate `manual-ci.yml` workflow is available for an explicit manual smoke test.
+## 11. Current API overview
 
-## Environment variables
-
-The basic MVP does not require a committed `.env` file. Never commit secrets. Use local environment configuration for future API keys, credentials or external services.
-
-## Troubleshooting
-
-### Frontend build fails
-
-Verify Node.js 20+:
-
-```bash
-node --version
-npm --version
+```text
+GET    /api/health
+GET    /api/dashboard
+GET    /api/cameras
+POST   /api/cameras
+DELETE /api/cameras/{camera_id}
+GET    /api/incidents
+GET    /api/incidents/{incident_id}
+PATCH  /api/incidents/{incident_id}/status
+POST   /api/events
+GET    /api/zones
+POST   /api/zones
+DELETE /api/zones/{zone_id}
+POST   /api/live/{camera_id}/frame
+POST   /api/video/upload
+GET    /api/video/jobs
+GET    /api/video/jobs/{job_id}
+GET    /api/video/jobs/{job_id}/mjpeg
+GET    /api/stream/events
+GET    /api/stream/heartbeat
 ```
 
-Then reinstall dependencies:
+Realtime dashboard delivery uses **Server-Sent Events (SSE)**.
 
-```bash
-rm -rf node_modules .next
-npm install
-npm run build
-```
+## 12. Full SIH checking order
 
-On Windows, remove `node_modules` and `.next` manually or with PowerShell.
+Use this order when preparing the demonstration:
 
-### Backend dependency/import error
-
-Activate the backend virtual environment and run:
-
-```bash
-pip install -r requirements.txt
-```
-
-### Backend port is already in use
-
-```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8001
-```
-
-Update the frontend/backend URL configuration if required.
-
-### Camera is not detected
-
-First verify that the phone/webcam is visible to the operating system. BorderSight's MVP expects a local camera source that the host system can access.
+1. Start backend.
+2. Open `/api/health`.
+3. Open `/docs` and verify the API is reachable.
+4. Run `pytest -q test_main.py test_live_camera.py`.
+5. Start frontend.
+6. Open `http://localhost:3000`.
+7. Verify **SYSTEM ONLINE** and **SSE connected**.
+8. Test a manual high-risk event through `/docs`.
+9. Verify the incident appears in the dashboard.
+10. Connect the phone to the laptop as a webcam.
+11. Select the phone camera in **Live surveillance**.
+12. Click **Start live camera**.
+13. Confirm the phone feed is visible.
+14. Confirm YOLO detection boxes/tracks appear.
+15. Stop the live camera.
+16. Upload a prerecorded CCTV video and verify its processing job.
+17. Verify the processed MJPEG output.
+18. Finally, open GitHub Actions and confirm all CI jobs are green.
 
 ## Current MVP limitations
 
-The following are intentionally prototype-grade and should be addressed before production deployment:
-
-- camera/source configuration is still being consolidated
-- data stores are in-memory and are lost on backend restart
-- uploaded video jobs are in-memory
-- authentication/authorization is not yet a production security layer
-- durable audit logging is not implemented
-- RTSP/NVR integration is a future production source
-- incident workflow currently supports `UNRESOLVED`, `ACKNOWLEDGED`, and `RESOLVED`
+- Live browser-camera ingestion currently publishes detection/tracking results; advanced border-rule evaluation for live frames should be integrated as the next inference milestone.
+- Data stores are in-memory and are lost on backend restart.
+- Uploaded video jobs are in-memory.
+- Authentication/authorization is not a production security layer.
+- Durable audit logging is not implemented.
+- RTSP/NVR integration is a future production source.
 
 ## Safety and deployment
 
