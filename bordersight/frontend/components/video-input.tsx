@@ -1,5 +1,59 @@
 "use client";
-import {useEffect,useRef,useState} from "react";
-const API=process.env.NEXT_PUBLIC_API_URL??"http://localhost:8000";
-type Job={job_id:string;status:string;progress?:number;filename?:string};
-export default function VideoInput(){const [mode,setMode]=useState<"camera"|"upload">("camera");const [file,setFile]=useState<File|null>(null);const [live,setLive]=useState(false);const [status,setStatus]=useState("READY");const [job,setJob]=useState<Job|null>(null);const ref=useRef<HTMLVideoElement>(null);const stream=useRef<MediaStream|null>(null);useEffect(()=>()=>stream.current?.getTracks().forEach(t=>t.stop()),[]);async function start(){try{const s=await navigator.mediaDevices.getUserMedia({video:true,audio:false});stream.current=s;if(ref.current){ref.current.srcObject=s;await ref.current.play()}setLive(true);setStatus("CAMERA LIVE")}catch{setStatus("CAMERA PERMISSION DENIED")}}function stop(){stream.current?.getTracks().forEach(t=>t.stop());stream.current=null;setLive(false);setStatus("STOPPED")}async function upload(){if(!file)return;const fd=new FormData();fd.append("file",file);setStatus("UPLOADING…");try{const r=await fetch(`${API}/api/video/upload`,{method:"POST",body:fd});const data=await r.json();if(!r.ok)throw Error(data.detail||"Upload failed");setJob(data);setStatus("AI PROCESSING");poll(data.job_id)}catch(e){setStatus(e instanceof Error?e.message:"UPLOAD FAILED")}}async function poll(id:string){const r=await fetch(`${API}/api/video/jobs/${id}`);if(!r.ok){setStatus("JOB STATUS UNAVAILABLE");return}const data=await r.json();setJob({...data,job_id:id});if(data.status==="processing"||data.status==="queued"){setTimeout(()=>poll(id),1000)}else if(data.status==="completed"){setStatus("ANALYSIS COMPLETE")}else if(data.status==="failed"){setStatus("ANALYSIS FAILED")}}return <div className="video-input"><div className="video-tabs"><button className={mode==="camera"?"selected":""} onClick={()=>setMode("camera")}>Phone / Webcam</button><button className={mode==="upload"?"selected":""} onClick={()=>setMode("upload")}>CCTV Video</button></div>{mode==="camera"?<><video ref={ref} muted playsInline className="video-preview"/><div className="video-actions"><span>● {status}</span>{live?<button onClick={stop}>Stop</button>:<button onClick={start}>Start camera</button>}</div></>:<><div className="video-frame">{job?.job_id?<img src={`${API}/api/video/jobs/${job.job_id}/mjpeg`} alt="AI annotated surveillance stream"/>:<div className="camera-placeholder"><div className="camera-icon">▣</div><strong>AI surveillance preview</strong><small>Annotated footage will appear here after upload</small></div>}</div><label className="dropzone"><input type="file" accept="video/*" onChange={e=>{setFile(e.target.files?.[0]??null);setJob(null);setStatus("READY")}}/><strong>{file?file.name:"Select surveillance footage"}</strong><span>MP4, WebM, MOV, AVI or MKV</span></label><div className="video-actions"><span>● {status}{job?.progress!=null?` · ${job.progress}%`:""}</span><button disabled={!file||status==="UPLOADING…"||status==="AI PROCESSING"} onClick={upload}>Start analysis</button></div></>}</div>}
+
+import { useEffect, useRef, useState } from "react";
+
+type Props = { apiBase?: string };
+
+export default function VideoInput({ apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000" }: Props) {
+  const [mode, setMode] = useState<"camera" | "upload">("camera");
+  const [camera, setCamera] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [status, setStatus] = useState("Ready");
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => () => streamRef.current?.getTracks().forEach(t => t.stop()), []);
+
+  async function startCamera() {
+    try {
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+      streamRef.current = stream;
+      if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+      setCamera(true); setStatus("Camera live");
+    } catch { setStatus("Camera permission unavailable"); }
+  }
+
+  function stopCamera() {
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null; if (videoRef.current) videoRef.current.srcObject = null;
+    setCamera(false); setStatus("Camera stopped");
+  }
+
+  async function upload() {
+    if (!file) return;
+    const body = new FormData(); body.append("file", file);
+    setStatus("Uploading CCTV footage…");
+    try {
+      const res = await fetch(`${apiBase}/api/video/upload`, { method: "POST", body });
+      if (!res.ok) throw new Error();
+      setStatus("Queued for AI analysis");
+    } catch { setStatus("Upload endpoint unavailable — frontend demo mode"); }
+  }
+
+  return <div className="video-input">
+    <div className="video-tabs">
+      <button className={mode === "camera" ? "selected" : ""} onClick={() => setMode("camera")}>Phone / Webcam</button>
+      <button className={mode === "upload" ? "selected" : ""} onClick={() => setMode("upload")}>CCTV Video</button>
+    </div>
+    {mode === "camera" ? <>
+      <video ref={videoRef} muted playsInline className="video-preview" />
+      <div className="video-actions"><span className="input-status">● {status}</span>{camera ? <button onClick={stopCamera}>Stop camera</button> : <button onClick={startCamera}>Start camera</button>}</div>
+    </> : <>
+      <label className="dropzone"><input type="file" accept="video/mp4,video/webm,video/quicktime,video/x-msvideo" onChange={e => setFile(e.target.files?.[0] ?? null)} />
+        <strong>{file ? file.name : "Drop surveillance footage here"}</strong><span>MP4, WebM, MOV or AVI · processed by the BorderSight AI engine</span>
+      </label>
+      <div className="video-actions"><span className="input-status">● {status}</span><button disabled={!file} onClick={upload}>Start analysis</button></div>
+    </>}
+  </div>;
+}
