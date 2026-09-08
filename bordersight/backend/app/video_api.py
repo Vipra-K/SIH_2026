@@ -12,6 +12,7 @@ router = APIRouter(prefix="/api/video", tags=["video"])
 UPLOAD_DIR = Path("data/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED = {".mp4", ".webm", ".mov", ".avi", ".mkv"}
+MAX_BYTES = 500 * 1024 * 1024
 
 jobs: dict[str, dict] = {}
 
@@ -23,17 +24,23 @@ async def upload_video(file: UploadFile = File(...)):
         raise HTTPException(400, "Unsupported video format")
     job_id = uuid.uuid4().hex[:12]
     target = UPLOAD_DIR / f"{job_id}{suffix}"
-    with target.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
-    jobs[job_id] = {"id": job_id, "filename": file.filename, "status": "queued", "path": str(target)}
-    asyncio.create_task(_mark_processing(job_id))
+    size = 0
+    try:
+        with target.open("wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_BYTES:
+                    raise HTTPException(413, "Video exceeds the 500 MB MVP limit")
+                out.write(chunk)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    jobs[job_id] = {"id": job_id, "filename": file.filename, "status": "queued", "progress": 0, "path": str(target)}
+    # The actual YOLO worker is imported lazily so the API health endpoint can
+    # still start on machines where the optional AI runtime is not installed.
+    from .video_processor import process_job
+    asyncio.create_task(process_job(job_id))
     return {"job_id": job_id, "status": "queued", "filename": file.filename}
-
-
-async def _mark_processing(job_id: str):
-    await asyncio.sleep(0.2)
-    if job_id in jobs:
-        jobs[job_id]["status"] = "processing"
 
 
 @router.get("/jobs/{job_id}")
