@@ -13,9 +13,7 @@ UPLOAD_DIR = Path("data/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED = {".mp4", ".webm", ".mov", ".avi", ".mkv"}
 MAX_BYTES = 500 * 1024 * 1024
-
 jobs: dict[str, dict] = {}
-
 
 @router.post("/upload")
 async def upload_video(file: UploadFile = File(...)):
@@ -36,12 +34,9 @@ async def upload_video(file: UploadFile = File(...)):
         target.unlink(missing_ok=True)
         raise
     jobs[job_id] = {"id": job_id, "filename": file.filename, "status": "queued", "progress": 0, "path": str(target)}
-    # The actual YOLO worker is imported lazily so the API health endpoint can
-    # still start on machines where the optional AI runtime is not installed.
     from .video_processor import process_job
     asyncio.create_task(process_job(job_id))
     return {"job_id": job_id, "status": "queued", "filename": file.filename}
-
 
 @router.get("/jobs/{job_id}")
 async def job_status(job_id: str):
@@ -49,7 +44,6 @@ async def job_status(job_id: str):
     if not job:
         raise HTTPException(404, "Video job not found")
     return {k: v for k, v in job.items() if k != "path"}
-
 
 @router.get("/jobs")
 async def list_jobs():
