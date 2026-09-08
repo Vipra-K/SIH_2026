@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from app.live_camera_api import router as live_camera_router
 from app.stream_api import router as stream_router
 from app.video_api import router as video_router
 from app.zones_api import router as zones_router
@@ -17,6 +18,7 @@ app.include_router(stream_router)
 app.include_router(video_router)
 app.include_router(zones_router)
 app.include_router(processed_video_router)
+app.include_router(live_camera_router)
 
 class Severity(str, Enum):
     low = "LOW"
