@@ -29,7 +29,6 @@ type MediaMtxPathsResponse = {
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const MEDIAMTX_API = process.env.NEXT_PUBLIC_MEDIAMTX_API_URL ?? "http://127.0.0.1:9997";
 const MEDIAMTX_HLS = process.env.NEXT_PUBLIC_MEDIAMTX_HLS_URL ?? "http://127.0.0.1:8888";
 const STORAGE_KEY = "bordersight-camera-layout-v2";
 
@@ -79,8 +78,11 @@ export default function Surveillance() {
   const refreshStreams = useCallback(async () => {
     setLoadingStreams(true);
     try {
-      const response = await fetch(`${MEDIAMTX_API}/v3/paths/list`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`MediaMTX returned ${response.status}`);
+      const response = await fetch("/api/mediamtx/streams", { cache: "no-store" });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? `Stream discovery returned ${response.status}`);
+      }
 
       const data = (await response.json()) as MediaMtxPathsResponse;
       const activeStreams = (data.items ?? [])
