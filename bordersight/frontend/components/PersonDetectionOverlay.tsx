@@ -126,11 +126,18 @@ export default function PersonDetectionOverlay({ videoRef, cameraId, running }: 
 
   return (
     <>
-      <canvas ref={canvasRef} className="person-detection-overlay" aria-hidden="true" />
+      <canvas
+        ref={canvasRef}
+        className="person-detection-overlay"
+        aria-hidden="true"
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 4 }}
+      />
       {running && (
-        <div className={`person-detection-status ${personCount > 0 ? "detected" : "clear"}`}>
-          <span className="person-status-dot" />
-          {personCount > 0 ? `${personCount} PERSON${personCount === 1 ? "" : "S"} DETECTED` : "NO PERSON DETECTED"}
+        <div
+          className={`person-detection-status ${personCount > 0 ? "detected" : "clear"}`}
+          style={{ position: "absolute", left: 12, bottom: 12, zIndex: 5, pointerEvents: "none", padding: "7px 10px", borderRadius: 6, background: "rgba(5, 10, 8, 0.82)", color: personCount > 0 ? "#86efac" : "#d1d5db", fontSize: 12, fontWeight: 700, letterSpacing: "0.04em" }}
+        >
+          <span className="person-status-dot" /> {personCount > 0 ? `${personCount} PERSON${personCount === 1 ? "" : "S"} DETECTED` : "NO PERSON DETECTED"}
         </div>
       )}
     </>
