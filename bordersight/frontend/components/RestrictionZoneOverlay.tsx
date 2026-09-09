@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { MouseEvent, RefObject } from "react";
 
 type Point = [number, number];
 type Zone = {
@@ -13,7 +14,7 @@ type Zone = {
 };
 
 type Props = {
-  videoRef: React.RefObject<HTMLVideoElement | null>;
+  videoRef: RefObject<HTMLVideoElement | null>;
   cameraId: string;
   running: boolean;
 };
@@ -47,7 +48,7 @@ export default function RestrictionZoneOverlay({ videoRef, cameraId, running }: 
     loadZones();
   }, [cameraId, loadZones]);
 
-  const getPoint = (event: React.MouseEvent<HTMLDivElement>): Point | null => {
+  const getPoint = (event: MouseEvent<HTMLDivElement>): Point | null => {
     const video = videoRef.current;
     if (!video) return null;
     const rect = video.getBoundingClientRect();
@@ -55,7 +56,7 @@ export default function RestrictionZoneOverlay({ videoRef, cameraId, running }: 
     return [clamp((event.clientX - rect.left) / rect.width), clamp((event.clientY - rect.top) / rect.height)];
   };
 
-  const handleCanvasClick = (event: React.MouseEvent<HTMLDivElement>) => {
+  const handleCanvasClick = (event: MouseEvent<HTMLDivElement>) => {
     if (!drawing) return;
     const point = getPoint(event);
     if (!point) return;
@@ -69,77 +70,55 @@ export default function RestrictionZoneOverlay({ videoRef, cameraId, running }: 
   };
 
   const saveZone = async () => {
-    if (draft.length < 3) {
-      setError("Add at least three points to create a zone.");
-      return;
-    }
+    if (draft.length < 3) { setError("Add at least three points to create a zone."); return; }
     const name = zoneName.trim();
-    if (!name) {
-      setError("Give the restricted zone a name before saving.");
-      return;
-    }
-    setBusy(true);
-    setError("");
+    if (!name) { setError("Give the restricted zone a name before saving."); return; }
+    setBusy(true); setError("");
     try {
-      const response = await fetch("/api/zones", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, camera_id: cameraId, points: draft, severity: "HIGH", enabled: true }),
-      });
+      const response = await fetch("/api/zones", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, camera_id: cameraId, points: draft, severity: "HIGH", enabled: true }) });
       if (!response.ok) throw new Error(`Could not save zone (${response.status})`);
       const created = (await response.json()) as Zone;
       setZones(current => [...current, created]);
       cancelDrawing();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save restriction zone.");
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   };
 
   const deleteZone = async (zoneId: string) => {
     if (!window.confirm("Delete this restriction zone?")) return;
-    setBusy(true);
-    setError("");
+    setBusy(true); setError("");
     try {
       const response = await fetch(`/api/zones/${encodeURIComponent(zoneId)}`, { method: "DELETE" });
       if (!response.ok) throw new Error(`Could not delete zone (${response.status})`);
       setZones(current => current.filter(zone => zone.id !== zoneId));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not delete restriction zone.");
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   };
 
   const toggleZone = async (zone: Zone) => {
-    setBusy(true);
-    setError("");
+    setBusy(true); setError("");
     try {
-      const response = await fetch(`/api/zones/${encodeURIComponent(zone.id)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: !zone.enabled }),
-      });
+      const response = await fetch(`/api/zones/${encodeURIComponent(zone.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !zone.enabled }) });
       if (!response.ok) throw new Error(`Could not update zone (${response.status})`);
       const updated = (await response.json()) as Zone;
       setZones(current => current.map(item => item.id === updated.id ? updated : item));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not update restriction zone.");
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   };
 
   const pointsFor = (points: Point[]) => points.map(([x, y]) => `${x * 100},${y * 100}`).join(" ");
 
   return (
-    <div ref={hostRef} className="restriction-zone-layer" onClick={handleCanvasClick}>
+    <div ref={hostRef} className={`restriction-zone-layer ${drawing ? "drawing" : ""}`} onClick={handleCanvasClick}>
       <svg className="restriction-zone-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         {zones.filter(zone => zone.enabled).map(zone => (
           <g key={zone.id}>
             <polygon points={pointsFor(zone.points)} className="restriction-zone-polygon" />
             <polyline points={pointsFor([...zone.points, zone.points[0]])} className="restriction-zone-line" />
+            <text x={zone.points[0][0] * 100} y={Math.max(4, zone.points[0][1] * 100 - 1.5)} className="restriction-zone-label">{zone.name}</text>
           </g>
         ))}
         {drawing && draft.length > 0 && (
@@ -158,7 +137,7 @@ export default function RestrictionZoneOverlay({ videoRef, cameraId, running }: 
           </button>
         ) : (
           <div className="zone-drawing-controls">
-            <input value={zoneName} onChange={event => setZoneName(event.target.value)} placeholder="Zone name (e.g. North Gate)" maxLength={80} />
+            <input value={zoneName} onChange={event => setZoneName(event.target.value)} placeholder="Zone name (e.g. North Gate)" maxLength={80} autoFocus />
             <span className="zone-point-count">{draft.length} points</span>
             <button className="zone-tool-button" disabled={busy || draft.length < 3} onClick={saveZone}>Save Zone</button>
             <button className="zone-cancel-button" disabled={busy} onClick={cancelDrawing}>Cancel</button>
