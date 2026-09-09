@@ -62,10 +62,11 @@ export default function VideoInput({ apiBase = process.env.NEXT_PUBLIC_API_URL ?
         }));
 
       setCameraDevices(cameras);
-      if (!selectedCamera && cameras.length > 0) {
-        const droidCam = cameras.find(device => /droidcam/i.test(device.label));
-        setSelectedCamera(droidCam?.deviceId ?? cameras[0].deviceId);
-      }
+      const droidCam = cameras.find(device => /droidcam/i.test(device.label));
+      setSelectedCamera(current => current && cameras.some(device => device.deviceId === current)
+        ? current
+        : droidCam?.deviceId ?? cameras[0]?.deviceId ?? "");
+      setStatus(cameras.length ? `${cameras.length} camera(s) detected` : "No camera detected");
     } catch {
       setStatus("Camera permission unavailable");
     }
@@ -185,7 +186,7 @@ export default function VideoInput({ apiBase = process.env.NEXT_PUBLIC_API_URL ?
         {!camera && <button onClick={loadCameraDevices}>Refresh cameras</button>}
       </div>
       <video ref={videoRef} muted playsInline className="video-preview" />
-      <div className="video-actions"><span className="input-status">● {status}</span>{camera ? <button onClick={stopCamera}>Stop camera</button> : <button onClick={startCamera}>{cameraDevices.length ? "Start camera" : "Detect cameras"}</button>}</div>
+      <div className="video-actions"><span className="input-status">● {status}</span>{camera ? <button onClick={stopCamera}>Stop camera</button> : <button disabled={!selectedCamera} onClick={startCamera}>Start camera</button>}</div>
     </> : <>
       {preview ? <img src={preview} className="video-preview" alt="AI annotated surveillance preview" /> : <label className="dropzone"><input type="file" accept="video/mp4,video/webm,video/quicktime,video/x-msvideo" onChange={e => setFile(e.target.files?.[0] ?? null)} /><strong>{file ? file.name : "Drop surveillance footage here"}</strong><span>MP4, WebM, MOV or AVI · max 500 MB</span></label>}
       <div className="video-actions"><span className="input-status">● {status}{job?.progress != null ? ` · ${job.progress}%` : ""}</span><button disabled={!file || !!job && job.status === "processing"} onClick={upload}>Start analysis</button></div>
