@@ -21,11 +21,7 @@ type CameraState = {
 };
 
 type MediaMtxPathsResponse = {
-  items?: Array<{
-    name: string;
-    online?: boolean;
-    ready?: boolean;
-  }>;
+  items?: Array<{ name: string; online?: boolean; ready?: boolean }>;
 };
 
 const MEDIAMTX_HLS = process.env.NEXT_PUBLIC_MEDIAMTX_HLS_URL ?? "http://127.0.0.1:8888";
@@ -36,10 +32,7 @@ export default function Surveillance() {
   const [loadingSources, setLoadingSources] = useState(true);
   const [sourceError, setSourceError] = useState("");
   const [cameras, setCameras] = useState<CameraState[]>(() => {
-    if (typeof window === "undefined") {
-      return [{ id: 1, sourceId: "", name: "CAM-01", running: false, error: "" }];
-    }
-
+    if (typeof window === "undefined") return [{ id: 1, sourceId: "", name: "CAM-01", running: false, error: "" }];
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
       if (Array.isArray(saved) && saved.length > 0) {
@@ -51,10 +44,7 @@ export default function Surveillance() {
           error: "",
         }));
       }
-    } catch {
-      // Ignore corrupt local state.
-    }
-
+    } catch {}
     return [{ id: 1, sourceId: "", name: "CAM-01", running: false, error: "" }];
   });
 
@@ -63,58 +53,32 @@ export default function Surveillance() {
   useEffect(() => {
     nextId.current = cameras.reduce((max, camera) => Math.max(max, camera.id), 0) + 1;
     try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify(cameras.map(({ id, sourceId, name }) => ({ id, sourceId, name })))
-      );
-    } catch {
-      // Local persistence is best-effort.
-    }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cameras.map(({ id, sourceId, name }) => ({ id, sourceId, name }))));
+    } catch {}
   }, [cameras]);
 
   const discoverSources = useCallback(async () => {
     setLoadingSources(true);
     setSourceError("");
-
     const discovered: CameraSource[] = [];
 
-    // 1. Discover normal browser camera devices: HP webcam, DroidCam devices,
-    // OBS Virtual Camera, USB cameras, etc.
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(device => device.kind === "videoinput");
-
-      videoDevices.forEach((device, index) => {
-        discovered.push({
-          id: `device:${device.deviceId}`,
-          name: device.label || `Camera Device ${index + 1}`,
-          type: "device",
-          deviceId: device.deviceId,
-          online: true,
-        });
+      devices.filter(device => device.kind === "videoinput").forEach((device, index) => {
+        discovered.push({ id: `device:${device.deviceId}`, name: device.label || `Camera Device ${index + 1}`, type: "device", deviceId: device.deviceId, online: true });
       });
     } catch (error) {
       setSourceError(error instanceof Error ? `Could not discover local cameras: ${error.message}` : "Could not discover local cameras.");
     }
 
-    // 2. Discover MediaMTX network streams through the existing backend route.
     try {
       const response = await fetch("/api/mediamtx/streams", { cache: "no-store" });
       if (!response.ok) throw new Error(`Stream discovery returned ${response.status}`);
       const data = (await response.json()) as MediaMtxPathsResponse;
-
       (data.items ?? [])
         .filter(stream => stream.online !== false && stream.ready !== false)
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
-        .forEach(stream => {
-          discovered.push({
-            id: `stream:${stream.name}`,
-            name: `${stream.name} · MediaMTX`,
-            type: "stream",
-            streamName: stream.name,
-            online: true,
-          });
-        });
+        .forEach(stream => discovered.push({ id: `stream:${stream.name}`, name: `${stream.name} · MediaMTX`, type: "stream", streamName: stream.name, online: true }));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not discover MediaMTX streams.";
       setSourceError(current => current ? `${current} ${message}` : message);
@@ -124,229 +88,83 @@ export default function Surveillance() {
     setLoadingSources(false);
   }, []);
 
+  // Discover once when the page is first loaded. Do not poll continuously.
   useEffect(() => {
     discoverSources();
-    const interval = setInterval(discoverSources, 5000);
-    return () => clearInterval(interval);
   }, [discoverSources]);
 
   const addCamera = () => {
     const id = nextId.current++;
-    setCameras(current => [
-      ...current,
-      { id, sourceId: "", name: `CAM-${String(id).padStart(2, "0")}`, running: false, error: "" },
-    ]);
+    setCameras(current => [...current, { id, sourceId: "", name: `CAM-${String(id).padStart(2, "0")}`, running: false, error: "" }]);
   };
-
-  const removeCamera = (id: number) => {
-    setCameras(current => current.filter(camera => camera.id !== id));
-  };
-
-  const updateCamera = (id: number, patch: Partial<CameraState>) => {
-    setCameras(current => current.map(camera => camera.id === id ? { ...camera, ...patch } : camera));
-  };
+  const removeCamera = (id: number) => setCameras(current => current.filter(camera => camera.id !== id));
+  const updateCamera = (id: number, patch: Partial<CameraState>) => setCameras(current => current.map(camera => camera.id === id ? { ...camera, ...patch } : camera));
 
   return <main className="main surveillance-page">
     <header className="topbar surveillance-header">
-      <div>
-        <div className="eyebrow">BorderSight / Operations</div>
-        <div className="title">Surveillance</div>
-        <div className="subtitle">Choose from local cameras and MediaMTX network streams.</div>
-      </div>
+      <div><div className="eyebrow">BorderSight / Operations</div><div className="title">Surveillance</div><div className="subtitle">Choose from local cameras and MediaMTX network streams.</div></div>
       <div className="camera-count">{cameras.length} camera{cameras.length === 1 ? "" : "s"}</div>
     </header>
-
     <section className="surveillance-toolbar panel">
-      <div>
-        <div className="panel-title">Camera feeds</div>
-        <div className="panel-meta">
-          {loadingSources ? "Discovering cameras..." : `${sources.length} camera source${sources.length === 1 ? "" : "s"} available.`}
-        </div>
-        {sourceError && <div className="camera-error">{sourceError}</div>}
-      </div>
-      <div className="toolbar-actions">
-        <button className="secondary-button" onClick={discoverSources}>Refresh cameras</button>
-        <button className="primary-button" onClick={addCamera}>+ Add Camera</button>
-      </div>
+      <div><div className="panel-title">Camera feeds</div><div className="panel-meta">{loadingSources ? "Discovering cameras..." : `${sources.length} camera source${sources.length === 1 ? "" : "s"} available.`}</div>{sourceError && <div className="camera-error">{sourceError}</div>}</div>
+      <div className="toolbar-actions"><button className="secondary-button" onClick={discoverSources}>Refresh cameras</button><button className="primary-button" onClick={addCamera}>+ Add Camera</button></div>
     </section>
-
     <section className="camera-grid">
-      {cameras.map(camera => (
-        <CameraCard
-          key={camera.id}
-          camera={camera}
-          sources={sources}
-          hlsBaseUrl={MEDIAMTX_HLS}
-          onUpdate={patch => updateCamera(camera.id, patch)}
-          onRemove={() => removeCamera(camera.id)}
-        />
-      ))}
+      {cameras.map(camera => <CameraCard key={camera.id} camera={camera} sources={sources} hlsBaseUrl={MEDIAMTX_HLS} onUpdate={patch => updateCamera(camera.id, patch)} onRemove={() => removeCamera(camera.id)} />)}
     </section>
   </main>;
 }
 
-function CameraCard({
-  camera,
-  sources,
-  hlsBaseUrl,
-  onUpdate,
-  onRemove,
-}: {
-  camera: CameraState;
-  sources: CameraSource[];
-  hlsBaseUrl: string;
-  onUpdate: (patch: Partial<CameraState>) => void;
-  onRemove: () => void;
-}) {
+function CameraCard({ camera, sources, hlsBaseUrl, onUpdate, onRemove }: { camera: CameraState; sources: CameraSource[]; hlsBaseUrl: string; onUpdate: (patch: Partial<CameraState>) => void; onRemove: () => void; }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
 
   const destroyPlayback = useCallback(() => {
-    hlsRef.current?.destroy();
-    hlsRef.current = null;
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
-      localStreamRef.current = null;
-    }
-
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.srcObject = null;
-      videoRef.current.removeAttribute("src");
-      videoRef.current.load();
-    }
+    hlsRef.current?.destroy(); hlsRef.current = null;
+    localStreamRef.current?.getTracks().forEach(track => track.stop()); localStreamRef.current = null;
+    if (videoRef.current) { videoRef.current.pause(); videoRef.current.srcObject = null; videoRef.current.removeAttribute("src"); videoRef.current.load(); }
   }, []);
-
-  const stop = useCallback(() => {
-    destroyPlayback();
-    onUpdate({ running: false });
-  }, [destroyPlayback, onUpdate]);
+  const stop = useCallback(() => { destroyPlayback(); onUpdate({ running: false }); }, [destroyPlayback, onUpdate]);
 
   const start = async () => {
     onUpdate({ error: "" });
-
     const source = sources.find(item => item.id === camera.sourceId);
-    if (!source) {
-      onUpdate({ error: "Select a camera source before starting this feed." });
-      return;
-    }
-
+    if (!source) { onUpdate({ error: "Select a camera source before starting this feed." }); return; }
     destroyPlayback();
-
     try {
       const video = videoRef.current;
       if (!video) throw new Error("Video element is not ready.");
-
       if (source.type === "device") {
-        // Direct browser connection to a physical/virtual camera device.
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { deviceId: { exact: source.deviceId } },
-          audio: false,
-        });
-        localStreamRef.current = stream;
-        video.srcObject = stream;
-        await video.play();
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: source.deviceId } }, audio: false });
+        localStreamRef.current = stream; video.srcObject = stream; await video.play();
       } else {
-        // Direct browser connection to the selected MediaMTX HLS stream.
         const hlsUrl = `${hlsBaseUrl}/${encodeURIComponent(source.streamName!)}/index.m3u8`;
-
-        if (video.canPlayType("application/vnd.apple.mpegurl")) {
-          video.src = hlsUrl;
-          await video.play();
-        } else if (Hls.isSupported()) {
-          const hls = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true,
-            liveSyncDurationCount: 2,
-          });
-          hlsRef.current = hls;
-          hls.attachMedia(video);
-
+        if (video.canPlayType("application/vnd.apple.mpegurl")) { video.src = hlsUrl; await video.play(); }
+        else if (Hls.isSupported()) {
+          const hls = new Hls({ enableWorker: true, lowLatencyMode: true, liveSyncDurationCount: 2 }); hlsRef.current = hls; hls.attachMedia(video);
           await new Promise<void>((resolve, reject) => {
             let settled = false;
-            const cleanup = () => {
-              hls.off(Hls.Events.MANIFEST_PARSED, onManifest);
-              hls.off(Hls.Events.ERROR, onError);
-            };
-            const onManifest = () => {
-              if (settled) return;
-              settled = true;
-              cleanup();
-              resolve();
-            };
-            const onError = (_event: string, data: { fatal?: boolean }) => {
-              if (!data.fatal || settled) return;
-              settled = true;
-              cleanup();
-              reject(new Error("Unable to load the selected MediaMTX stream."));
-            };
-            hls.on(Hls.Events.MANIFEST_PARSED, onManifest);
-            hls.on(Hls.Events.ERROR, onError);
-            hls.loadSource(hlsUrl);
+            const cleanup = () => { hls.off(Hls.Events.MANIFEST_PARSED, onManifest); hls.off(Hls.Events.ERROR, onError); };
+            const onManifest = () => { if (settled) return; settled = true; cleanup(); resolve(); };
+            const onError = (_event: string, data: { fatal?: boolean }) => { if (!data.fatal || settled) return; settled = true; cleanup(); reject(new Error("Unable to load the selected MediaMTX stream.")); };
+            hls.on(Hls.Events.MANIFEST_PARSED, onManifest); hls.on(Hls.Events.ERROR, onError); hls.loadSource(hlsUrl);
           });
-
           await video.play();
-        } else {
-          throw new Error("This browser does not support HLS playback.");
-        }
+        } else throw new Error("This browser does not support HLS playback.");
       }
-
       onUpdate({ running: true, error: "" });
     } catch (error) {
-      destroyPlayback();
-      onUpdate({
-        running: false,
-        error: error instanceof Error ? error.message : "Unable to start camera stream",
-      });
+      destroyPlayback(); onUpdate({ running: false, error: error instanceof Error ? error.message : "Unable to start camera stream" });
     }
   };
 
   useEffect(() => () => destroyPlayback(), [destroyPlayback]);
 
   return <article className="camera-card panel">
-    <div className="camera-card-head">
-      <div>
-        <div className="camera-name">{camera.name}</div>
-        <div className={`camera-status ${camera.running ? "online" : "offline"}`}>
-          <span className="dot" />{camera.running ? "LIVE" : "OFFLINE"}
-        </div>
-      </div>
-      {camera.id > 1 && <button className="remove-button" onClick={onRemove}>Remove</button>}
-    </div>
-
-    <div className="camera-view">
-      <video ref={videoRef} muted playsInline autoPlay />
-      {!camera.running && <div className="camera-empty">
-        <div className="camera-empty-icon">◉</div>
-        <strong>{camera.sourceId ? "Camera ready" : "No camera selected"}</strong>
-        <span>{camera.sourceId ? "Start the selected camera feed." : "Select a local camera, OBS camera, DroidCam, or MediaMTX stream below."}</span>
-      </div>}
-      <div className="camera-overlay">{camera.running ? "● LIVE · DIRECT" : "CAMERA READY"}</div>
-    </div>
-
+    <div className="camera-card-head"><div><div className="camera-name">{camera.name}</div><div className={`camera-status ${camera.running ? "online" : "offline"}`}><span className="dot" />{camera.running ? "LIVE" : "OFFLINE"}</div></div>{camera.id > 1 && <button className="remove-button" onClick={onRemove}>Remove</button>}</div>
+    <div className="camera-view"><video ref={videoRef} muted playsInline autoPlay />{!camera.running && <div className="camera-empty"><div className="camera-empty-icon">◉</div><strong>{camera.sourceId ? "Camera ready" : "No camera selected"}</strong><span>{camera.sourceId ? "Start the selected camera feed." : "Select a local camera, OBS camera, DroidCam, or MediaMTX stream below."}</span></div>}<div className="camera-overlay">{camera.running ? "● LIVE · DIRECT" : "CAMERA READY"}</div></div>
     {camera.error && <div className="camera-error">{camera.error}</div>}
-
-    <div className="camera-controls">
-      <select
-        value={camera.sourceId}
-        disabled={camera.running}
-        onChange={event => {
-          const source = sources.find(item => item.id === event.target.value);
-          onUpdate({ sourceId: event.target.value, name: source ? source.name.replace(" · MediaMTX", "") : camera.name, error: "" });
-        }}
-      >
-        <option value="">Select camera source...</option>
-        {sources.map(source => (
-          <option key={source.id} value={source.id}>
-            {source.name}{source.type === "stream" ? " · NETWORK" : " · LOCAL"}
-          </option>
-        ))}
-      </select>
-      <button className={camera.running ? "stop-button" : "primary-button"} onClick={camera.running ? stop : start}>
-        {camera.running ? "Stop" : "Start Camera"}
-      </button>
-    </div>
+    <div className="camera-controls"><select value={camera.sourceId} disabled={camera.running} onChange={event => { const source = sources.find(item => item.id === event.target.value); onUpdate({ sourceId: event.target.value, name: source ? source.name.replace(" · MediaMTX", "") : camera.name, error: "" }); }}><option value="">Select camera source...</option>{sources.map(source => <option key={source.id} value={source.id}>{source.name}{source.type === "stream" ? " · NETWORK" : " · LOCAL"}</option>)}</select><button className={camera.running ? "stop-button" : "primary-button"} onClick={camera.running ? stop : start}>{camera.running ? "Stop" : "Start Camera"}</button></div>
   </article>;
 }
