@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MediaMTXWebRTCReader } from "../../lib/mediamtx-reader";
 import PersonDetectionOverlay from "../../components/PersonDetectionOverlay";
+import RestrictionZoneOverlay from "../../components/RestrictionZoneOverlay";
 
 type CameraSource = { id: string; name: string; type: "device" | "stream"; deviceId?: string; streamName?: string; online: boolean };
 type CameraState = { id: number; sourceId: string; name: string; running: boolean; error: string };
@@ -106,9 +107,11 @@ function CameraCard({ camera, sources, onUpdate, onRemove }: { camera: CameraSta
 
   useEffect(() => () => destroyPlayback(), [destroyPlayback]);
 
+  const stableCameraId = `CAM-${String(camera.id).padStart(2, "0")}`;
+
   return <article className="camera-card panel">
     <div className="camera-card-head"><div><div className="camera-name">{camera.name}</div><div className={`camera-status ${camera.running ? "online" : "offline"}`}><span className="dot" />{camera.running ? "LIVE" : "OFFLINE"}</div></div>{camera.id > 1 && <button className="remove-button" onClick={onRemove}>Remove</button>}</div>
-    <div className="camera-view" style={{ position: "relative" }}><video ref={videoRef} muted playsInline autoPlay /><PersonDetectionOverlay videoRef={videoRef} cameraId={camera.name} running={camera.running} />{!camera.running && <div className="camera-empty"><div className="camera-empty-icon">◉</div><strong>{camera.sourceId ? "Camera ready" : "No camera selected"}</strong><span>{camera.sourceId ? "Start the selected camera feed." : "Select a local camera, OBS camera, DroidCam, or MediaMTX stream below."}</span></div>}<div className="camera-overlay">{camera.running ? "● LIVE · DIRECT" : "CAMERA READY"}</div></div>
+    <div className="camera-view" style={{ position: "relative" }}><video ref={videoRef} muted playsInline autoPlay /><PersonDetectionOverlay videoRef={videoRef} cameraId={stableCameraId} running={camera.running} /><RestrictionZoneOverlay videoRef={videoRef} cameraId={stableCameraId} running={camera.running} />{!camera.running && <div className="camera-empty"><div className="camera-empty-icon">◉</div><strong>{camera.sourceId ? "Camera ready" : "No camera selected"}</strong><span>{camera.sourceId ? "Start the selected camera feed." : "Select a local camera, OBS camera, DroidCam, or MediaMTX stream below."}</span></div>}<div className="camera-overlay">{camera.running ? "● LIVE · DIRECT" : "CAMERA READY"}</div></div>
     {camera.error && <div className="camera-error">{camera.error}</div>}
     <div className="camera-controls"><select value={camera.sourceId} disabled={camera.running} onChange={event => { const source = sources.find(item => item.id === event.target.value); onUpdate({ sourceId: event.target.value, name: source ? source.name.replace(" · MediaMTX", "") : camera.name, error: "" }); }}><option value="">Select camera source...</option>{sources.map(source => <option key={source.id} value={source.id}>{source.name}{source.type === "stream" ? " · NETWORK" : " · LOCAL"}</option>)}</select><button className={camera.running ? "stop-button" : "primary-button"} onClick={camera.running ? stop : start}>{camera.running ? "Stop" : "Start Camera"}</button></div>
   </article>;
