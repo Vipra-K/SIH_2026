@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 from fastapi import APIRouter, HTTPException, Request
 
-from .inference_pipeline import get_model
+from .inference_pipeline import CONFIDENCE_THRESHOLD, PERSON_CLASS_ID, get_model
 from .realtime import hub
 
 router = APIRouter(prefix="/api/live", tags=["live camera"])
@@ -24,7 +24,9 @@ async def process_live_frame(camera_id: str, request: Request):
     if frame is None:
         raise HTTPException(400, "Invalid JPEG camera frame")
 
-    result = get_model().track(frame, persist=True, conf=0.45, verbose=False)[0]
+    result = get_model().track(
+        frame, persist=True, conf=CONFIDENCE_THRESHOLD, verbose=False
+    )[0]
     detections: list[dict] = []
     boxes = result.boxes
     if boxes is not None:
@@ -35,19 +37,26 @@ async def process_live_frame(camera_id: str, request: Request):
             boxes.conf.cpu().tolist(),
             boxes.xyxy.cpu().tolist(),
         ):
-            detections.append({
-                "track_id": track_id,
-                "label": result.names[int(cls_id)],
-                "confidence": float(score),
-                "bbox": [float(v) for v in xyxy],
-            })
+            if int(cls_id) != PERSON_CLASS_ID:
+                continue
+            detections.append(
+                {
+                    "track_id": track_id,
+                    "label": "person",
+                    "confidence": round(float(score), 4),
+                    "bbox": [round(float(v), 2) for v in xyxy],
+                }
+            )
 
     timestamp = time.time()
-    await hub.publish({
+    payload = {
         "kind": "detection",
         "camera_id": camera_id,
         "timestamp": timestamp,
         "detections": detections,
+        "person_detected": bool(detections),
+        "person_count": len(detections),
         "source": "browser-camera",
-    })
-    return {"camera_id": camera_id, "timestamp": timestamp, "detections": detections}
+    }
+    await hub.publish(payload)
+    return payload
