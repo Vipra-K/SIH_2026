@@ -4,12 +4,12 @@ from __future__ import annotations
 from functools import lru_cache
 
 import cv2
+import numpy as np
 from ultralytics import YOLO
 
 from .frame_store import append
 from .zone_engine import ZoneViolationEngine
 from .zones_api import get_zones_for_camera
-
 
 PERSON_CLASS_ID = 0
 CONFIDENCE_THRESHOLD = 0.45
@@ -22,7 +22,7 @@ def get_model() -> YOLO:
 
 
 def _person_annotations(result, frame, camera_id: str | None = None, zone_engine: ZoneViolationEngine | None = None):
-    """Return person detections and a frame annotated with person boxes/zones."""
+    """Return person detections, an annotated frame, and zone-entry events."""
     detections = []
     annotated = frame.copy()
     boxes = result.boxes
@@ -72,7 +72,7 @@ def _person_annotations(result, frame, camera_id: str | None = None, zone_engine
     for zone in zones:
         polygon = [(int(point[0] * frame.shape[1]), int(point[1] * frame.shape[0])) for point in zone["points"]]
         if len(polygon) >= 3:
-            cv2.polylines(annotated, [__import__("numpy").array(polygon, dtype="int32")], True, (80, 90, 235), 2)
+            cv2.polylines(annotated, [np.array(polygon, dtype=np.int32)], True, (80, 90, 235), 2)
             cv2.putText(annotated, zone["name"], polygon[0], cv2.FONT_HERSHEY_SIMPLEX, 0.55, (120, 140, 255), 2, cv2.LINE_AA)
 
     return detections, annotated, zone_events
