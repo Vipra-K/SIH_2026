@@ -23,8 +23,7 @@ def _connect() -> sqlite3.Connection:
 
 def _init_db() -> None:
     with _connect() as connection:
-        connection.execute(
-            """
+        connection.execute("""
             CREATE TABLE IF NOT EXISTS restriction_zones (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -35,11 +34,8 @@ def _init_db() -> None:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
-            """
-        )
-        connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_restriction_zones_camera ON restriction_zones(camera_id)"
-        )
+        """)
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_restriction_zones_camera ON restriction_zones(camera_id)")
 
 
 _init_db()
@@ -82,22 +78,25 @@ def _row_to_zone(row: sqlite3.Row) -> dict:
     }
 
 
-@router.get("")
-async def list_zones(camera_id: str | None = None, include_disabled: bool = True):
-    query = "SELECT * FROM restriction_zones"
-    params: list[object] = []
-    conditions: list[str] = []
-    if camera_id:
-        conditions.append("camera_id = ?")
-        params.append(camera_id)
+def get_zones_for_camera(camera_id: str, include_disabled: bool = False) -> list[dict]:
+    """Synchronous lookup for inference workers that already run in Python."""
+    query = "SELECT * FROM restriction_zones WHERE camera_id = ?"
+    params: list[object] = [camera_id]
     if not include_disabled:
-        conditions.append("enabled = 1")
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
+        query += " AND enabled = 1"
     query += " ORDER BY created_at ASC"
     with _connect() as connection:
         rows = connection.execute(query, params).fetchall()
     return [_row_to_zone(row) for row in rows]
+
+
+@router.get("")
+async def list_zones(camera_id: str | None = None, include_disabled: bool = True):
+    if camera_id:
+        return get_zones_for_camera(camera_id, include_disabled)
+    with _connect() as connection:
+        rows = connection.execute("SELECT * FROM restriction_zones ORDER BY created_at ASC").fetchall()
+    return [_row_to_zone(row) for row in rows if include_disabled or row["enabled"]]
 
 
 @router.post("", status_code=201)
@@ -120,7 +119,6 @@ async def update_zone(zone_id: str, update: ZoneUpdate):
         raise HTTPException(400, "No changes supplied")
     if "points" in changes:
         _validate_points(changes["points"])
-
     assignments: list[str] = []
     params: list[object] = []
     for field in ("name", "severity", "enabled"):
@@ -132,11 +130,8 @@ async def update_zone(zone_id: str, update: ZoneUpdate):
         params.append(json.dumps(changes["points"]))
     assignments.append("updated_at = CURRENT_TIMESTAMP")
     params.append(zone_id)
-
     with _connect() as connection:
-        cursor = connection.execute(
-            f"UPDATE restriction_zones SET {', '.join(assignments)} WHERE id = ?", params
-        )
+        cursor = connection.execute(f"UPDATE restriction_zones SET {', '.join(assignments)} WHERE id = ?", params)
         if cursor.rowcount == 0:
             raise HTTPException(404, "Zone not found")
         row = connection.execute("SELECT * FROM restriction_zones WHERE id = ?", (zone_id,)).fetchone()
