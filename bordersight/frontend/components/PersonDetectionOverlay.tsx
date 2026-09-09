@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 
 type Detection = {
   track_id: number | null;
@@ -10,7 +10,7 @@ type Detection = {
 };
 
 type Props = {
-  videoRef: React.RefObject<HTMLVideoElement | null>;
+  videoRef: RefObject<HTMLVideoElement | null>;
   cameraId: string;
   running: boolean;
 };
@@ -110,7 +110,7 @@ export default function PersonDetectionOverlay({ videoRef, cameraId, running }: 
             }
           }
         } catch {
-          // A network/CORS/canvas failure should not stop the camera preview.
+          // Keep the camera preview running if inference is temporarily unavailable.
         }
       }
 
