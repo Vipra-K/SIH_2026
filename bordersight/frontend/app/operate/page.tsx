@@ -28,7 +28,6 @@ type MediaMtxPathsResponse = {
   }>;
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const MEDIAMTX_HLS = process.env.NEXT_PUBLIC_MEDIAMTX_HLS_URL ?? "http://127.0.0.1:8888";
 const STORAGE_KEY = "bordersight-camera-layout-v2";
 
@@ -64,7 +63,6 @@ export default function Surveillance() {
   useEffect(() => {
     const maxId = cameras.reduce((max, camera) => Math.max(max, camera.id), 0);
     nextId.current = maxId + 1;
-
     try {
       localStorage.setItem(
         STORAGE_KEY,
@@ -83,7 +81,6 @@ export default function Surveillance() {
         const data = (await response.json().catch(() => null)) as { error?: string } | null;
         throw new Error(data?.error ?? `Stream discovery returned ${response.status}`);
       }
-
       const data = (await response.json()) as MediaMtxPathsResponse;
       const activeStreams = (data.items ?? [])
         .filter(stream => stream.online !== false && stream.ready !== false)
@@ -94,7 +91,6 @@ export default function Surveillance() {
           tracks: stream.tracks,
         }))
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-
       setStreams(activeStreams);
       setStreamError("");
     } catch (error) {
@@ -160,7 +156,6 @@ export default function Surveillance() {
           key={camera.id}
           camera={camera}
           streams={streams}
-          api={API}
           hlsBaseUrl={MEDIAMTX_HLS}
           onUpdate={patch => updateCamera(camera.id, patch)}
           onRemove={() => removeCamera(camera.id)}
@@ -173,31 +168,22 @@ export default function Surveillance() {
 function CameraCard({
   camera,
   streams,
-  api,
   hlsBaseUrl,
   onUpdate,
   onRemove,
 }: {
   camera: CameraState;
   streams: CameraStream[];
-  api: string;
   hlsBaseUrl: string;
   onUpdate: (patch: Partial<CameraState>) => void;
   onRemove: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const sendingRef = useRef(false);
 
   const destroyPlayback = useCallback(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = null;
-
     hlsRef.current?.destroy();
     hlsRef.current = null;
-
     if (videoRef.current) {
       videoRef.current.pause();
       videoRef.current.removeAttribute("src");
@@ -209,41 +195,6 @@ function CameraCard({
     destroyPlayback();
     onUpdate({ running: false });
   }, [destroyPlayback, onUpdate]);
-
-  const sendFrame = useCallback(async () => {
-    if (sendingRef.current || !videoRef.current || !canvasRef.current) return;
-
-    const video = videoRef.current;
-    if (video.readyState < 2 || !video.videoWidth) return;
-
-    sendingRef.current = true;
-    const canvas = canvasRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    try {
-      const blob = await new Promise<Blob | null>(resolve =>
-        canvas.toBlob(resolve, "image/jpeg", 0.72)
-      );
-      if (!blob) return;
-
-      const response = await fetch(`${api}/api/live/${encodeURIComponent(camera.name)}/frame`, {
-        method: "POST",
-        headers: { "Content-Type": "image/jpeg" },
-        body: blob,
-      });
-
-      if (!response.ok) throw new Error(`AI endpoint returned ${response.status}`);
-      onUpdate({ error: "" });
-    } catch (error) {
-      onUpdate({
-        error: error instanceof Error ? error.message : "Could not send camera frame",
-      });
-    } finally {
-      sendingRef.current = false;
-    }
-  }, [api, camera.name, onUpdate]);
 
   const start = async () => {
     onUpdate({ error: "" });
@@ -265,7 +216,8 @@ function CameraCard({
       const video = videoRef.current;
       if (!video) throw new Error("Video element is not ready.");
 
-      const hlsUrl = `${hlsBaseUrl}/${camera.streamName}/index.m3u8`;
+      // The browser receives the selected camera stream directly from MediaMTX.
+      const hlsUrl = `${hlsBaseUrl}/${encodeURIComponent(camera.streamName)}/index.m3u8`;
 
       if (video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = hlsUrl;
@@ -277,24 +229,29 @@ function CameraCard({
           liveSyncDurationCount: 2,
         });
         hlsRef.current = hls;
-        hls.loadSource(hlsUrl);
         hls.attachMedia(video);
 
         await new Promise<void>((resolve, reject) => {
-          const onManifest = () => {
+          let settled = false;
+          const cleanup = () => {
             hls.off(Hls.Events.MANIFEST_PARSED, onManifest);
             hls.off(Hls.Events.ERROR, onError);
+          };
+          const onManifest = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
             resolve();
           };
           const onError = (_event: string, data: { fatal?: boolean }) => {
-            if (data.fatal) {
-              hls.off(Hls.Events.MANIFEST_PARSED, onManifest);
-              hls.off(Hls.Events.ERROR, onError);
-              reject(new Error("Unable to load the selected MediaMTX stream."));
-            }
+            if (!data.fatal || settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error("Unable to load the selected MediaMTX stream."));
           };
           hls.on(Hls.Events.MANIFEST_PARSED, onManifest);
           hls.on(Hls.Events.ERROR, onError);
+          hls.loadSource(hlsUrl);
         });
 
         await video.play();
@@ -303,7 +260,6 @@ function CameraCard({
       }
 
       onUpdate({ running: true, error: "" });
-      timerRef.current = setInterval(sendFrame, 700);
     } catch (error) {
       destroyPlayback();
       onUpdate({
@@ -333,9 +289,8 @@ function CameraCard({
         <strong>{camera.streamName ? "Stream ready" : "No stream selected"}</strong>
         <span>{camera.streamName ? `Select ${camera.streamName} and start the feed.` : "Select an available MediaMTX stream below."}</span>
       </div>}
-      <div className="camera-overlay">{camera.running ? "● LIVE · AI INPUT" : "CAMERA READY"}</div>
+      <div className="camera-overlay">{camera.running ? "● LIVE · DIRECT STREAM" : "CAMERA READY"}</div>
     </div>
-    <canvas ref={canvasRef} style={{ display: "none" }} />
 
     {camera.error && <div className="camera-error">{camera.error}</div>}
 
