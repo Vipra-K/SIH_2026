@@ -1,8 +1,16 @@
 """Smoke tests for browser/phone live-camera ingestion."""
 
+import sys
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
-from app.main import app
+# The backend app is exposed from backend/main.py, while its supporting
+# modules live under backend/app/. Keep the test import layout consistent
+# with test_main.py and with the documented backend execution layout.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from main import app  # noqa: E402
 
 client = TestClient(app)
 
